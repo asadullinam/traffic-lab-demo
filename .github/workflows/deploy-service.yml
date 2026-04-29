@@ -1,0 +1,222 @@
+name: Deploy Service
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  PROJECT_ID: 042f87bf-a9e0-415d-b307-cd388ca44910
+  STAGE_SLUG: ${{ vars.STAGE_SLUG || 'production' }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    env:
+      KUBECONFIG_BASE64: ${{ secrets.KUBECONFIG_BASE64 }}
+      YC_SERVICE_ACCOUNT_KEY_JSON: ${{ secrets.YC_SERVICE_ACCOUNT_KEY_JSON }}
+      YC_OAUTH_TOKEN: ${{ secrets.YC_OAUTH_TOKEN }}
+      YC_MANAGED_K8S_CLUSTER_ID: ${{ secrets.YC_MANAGED_K8S_CLUSTER_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve IMAGE_NAME (lowercase owner)
+        run: |
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_NAME=ghcr.io/${OWNER_LC}/traffic-lab-demo-traffic-lab-demo:${GITHUB_SHA}" >> "$GITHUB_ENV"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate deployment auth source
+        env:
+          KUBECONFIG_BASE64: ${{ secrets.KUBECONFIG_BASE64 }}
+        run: |
+          if [ -z "$KUBECONFIG_BASE64" ] && [ -z "$YC_MANAGED_K8S_CLUSTER_ID" ]; then
+            echo "Missing deployment auth source: set KUBECONFIG_BASE64 or YC_MANAGED_K8S_CLUSTER_ID"
+            exit 1
+          fi
+          if [ -z "$KUBECONFIG_BASE64" ] && [ -z "$YC_SERVICE_ACCOUNT_KEY_JSON" ] && [ -z "$YC_OAUTH_TOKEN" ]; then
+            echo "Missing YC credentials: set YC_SERVICE_ACCOUNT_KEY_JSON or YC_OAUTH_TOKEN to fetch kubeconfig"
+            exit 1
+          fi
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_NAME }}
+
+      - name: Configure kubectl
+        if: ${{ env.KUBECONFIG_BASE64 != '' }}
+        run: |
+          mkdir -p $HOME/.kube
+          echo "$KUBECONFIG_BASE64" | base64 --decode > $HOME/.kube/config
+
+      - name: Install Yandex Cloud CLI
+        run: |
+          curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash -s -- -i $HOME/yandex-cloud -n
+          echo "$HOME/yandex-cloud/bin" >> $GITHUB_PATH
+
+      - name: Configure Yandex Cloud profile
+        if: ${{ env.YC_SERVICE_ACCOUNT_KEY_JSON != '' || env.YC_OAUTH_TOKEN != '' }}
+        run: |
+          yc config profile create default || true
+          if [ -n "$YC_SERVICE_ACCOUNT_KEY_JSON" ]; then
+            printf '%s' "$YC_SERVICE_ACCOUNT_KEY_JSON" > $HOME/sa-key.json
+            yc config set service-account-key $HOME/sa-key.json
+          elif [ -n "$YC_OAUTH_TOKEN" ]; then
+            yc config set token "$YC_OAUTH_TOKEN"
+          fi
+
+      - name: Refresh kubeconfig from Yandex Cloud (optional)
+        if: ${{ env.YC_MANAGED_K8S_CLUSTER_ID != '' && (env.YC_SERVICE_ACCOUNT_KEY_JSON != '' || env.YC_OAUTH_TOKEN != '') }}
+        run: |
+          yc managed-kubernetes cluster get-credentials "$YC_MANAGED_K8S_CLUSTER_ID" --external --force
+
+      - name: Normalize kubeconfig exec command
+        run: |
+          CURRENT_CONTEXT=$(kubectl config current-context 2>/dev/null || true)
+          if [ -z "$CURRENT_CONTEXT" ]; then
+            CURRENT_CONTEXT=$(kubectl config view -o jsonpath="{.contexts[0].name}")
+            if [ -n "$CURRENT_CONTEXT" ]; then
+              kubectl config use-context "$CURRENT_CONTEXT"
+            fi
+          fi
+          CURRENT_USER=""
+          if [ -n "$CURRENT_CONTEXT" ]; then
+            CURRENT_USER=$(kubectl config view -o jsonpath="{.contexts[?(@.name==\"$CURRENT_CONTEXT\")].context.user}")
+          fi
+          if [ -n "$CURRENT_USER" ]; then
+            kubectl config set-credentials "$CURRENT_USER" \
+              --exec-command=yc \
+              --exec-api-version=client.authentication.k8s.io/v1beta1 \
+              --exec-arg=managed-kubernetes \
+              --exec-arg=create-token
+          else
+            echo "Skipping kubeconfig exec normalization because no current user was found"
+          fi
+
+      - name: Verify Kubernetes API connectivity
+        run: |
+          API_SERVER=$(kubectl config view --minify -o jsonpath="{.clusters[0].cluster.server}")
+          echo "Kubernetes API endpoint: $API_SERVER"
+          if ! kubectl --request-timeout=20s get --raw=/version > /tmp/k8s-version.json; then
+            echo "::error::Не удалось подключиться к Kubernetes API ($API_SERVER). Проверь, что kubeconfig указывает на внешний endpoint кластера, либо запускай деплой на self-hosted runner в той же сети."
+            exit 1
+          fi
+          cat /tmp/k8s-version.json
+
+      - name: Verify kubeconfig targets project vcluster
+        run: |
+          HOST_PROJECT_NAMESPACE="project-${PROJECT_ID}"
+          if kubectl get namespace "$HOST_PROJECT_NAMESPACE" >/dev/null 2>&1; then
+            echo "::error::KUBECONFIG указывает на host cluster (найден namespace $HOST_PROJECT_NAMESPACE). Для deploy нужен kubeconfig vcluster этого проекта."
+            echo "::error::Открой deploy-service UI -> Проект -> Доступ -> «Скопировать KUBECONFIG_BASE64» и обнови repository secret."
+            exit 1
+          fi
+
+          if kubectl get namespace -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | grep -q '^project-prj-'; then
+            echo "::error::KUBECONFIG похож на host cluster (видны namespace project-prj-*). Для deploy нужен kubeconfig vcluster проекта."
+            echo "::error::Используй секрет KUBECONFIG_BASE64 из кнопки «Скопировать KUBECONFIG_BASE64» в UI deploy-service."
+            exit 1
+          fi
+
+      - name: Ensure namespace exists
+        run: |
+          retry_or_fail() {
+            description="$1"
+            shift
+            for attempt in 1 2 3 4 5; do
+              if "$@"; then
+                return 0
+              fi
+              echo "$description retry $attempt failed"
+              sleep 10
+            done
+            echo "$description failed after 5 attempts"
+            return 1
+          }
+          retry_or_fail "namespace apply" sh -c 'kubectl create namespace "$STAGE_SLUG" --dry-run=client -o yaml | kubectl apply --validate=false -f -'
+
+      - name: Deploy manifests
+        run: |
+          retry_or_fail() {
+            description="$1"
+            shift
+            for attempt in 1 2 3 4 5; do
+              if "$@"; then
+                return 0
+              fi
+              echo "$description retry $attempt failed"
+              sleep 10
+            done
+            echo "$description failed after 5 attempts"
+            return 1
+          }
+          retry_or_fail "deployment apply" sh -c 'sed "s#IMAGE_PLACEHOLDER#${IMAGE_NAME}#g" k8s/production/traffic-lab-demo/deployment.yaml | kubectl -n "$STAGE_SLUG" apply --validate=false -f -'
+          retry_or_fail "service apply" kubectl -n "$STAGE_SLUG" apply --validate=false -f k8s/production/traffic-lab-demo/service.yaml
+          retry_or_fail "ingress apply" kubectl -n "$STAGE_SLUG" apply --validate=false -f k8s/production/traffic-lab-demo/ingress.yaml
+
+      - name: Verify deployment
+        run: |
+          # Run rollout status in the background; poll for crash states to fail fast.
+          kubectl -n "$STAGE_SLUG" rollout status deployment/traffic-lab-demo --timeout=180s &
+          ROLLOUT_PID=$!
+          CRASHED=0
+          for _i in $(seq 1 36); do
+            sleep 5
+            if ! kill -0 "$ROLLOUT_PID" 2>/dev/null; then
+              break
+            fi
+            REASONS=$(kubectl -n "$STAGE_SLUG" get pods -l app=traffic-lab-demo \
+              -o jsonpath='{range .items[*]}{range .status.containerStatuses[*]}{.state.waiting.reason}{"\n"}{.lastState.terminated.reason}{"\n"}{end}{end}' 2>/dev/null || true)
+            if echo "$REASONS" | grep -qE '^(CrashLoopBackOff|OOMKilled|ImagePullBackOff|ErrImagePull|CreateContainerConfigError)$'; then
+              CRASHED=1
+              kill "$ROLLOUT_PID" 2>/dev/null || true
+              wait "$ROLLOUT_PID" 2>/dev/null || true
+              break
+            fi
+          done
+          if [ "$CRASHED" = "1" ]; then
+            echo "::error::Pod упал (CrashLoopBackOff/OOMKilled/ImagePullBackOff). Собираем диагностику..."
+            kubectl -n "$STAGE_SLUG" get pods -l app=traffic-lab-demo -o wide || true
+            kubectl -n "$STAGE_SLUG" describe pod -l app=traffic-lab-demo || true
+            kubectl -n "$STAGE_SLUG" logs -l app=traffic-lab-demo --tail=100 --previous 2>/dev/null \
+              || kubectl -n "$STAGE_SLUG" logs -l app=traffic-lab-demo --tail=100 || true
+            kubectl -n "$STAGE_SLUG" get events --sort-by=.lastTimestamp | tail -n 30 || true
+            exit 1
+          fi
+          wait "$ROLLOUT_PID"
+          ROLLOUT_RC=$?
+          if [ "$ROLLOUT_RC" != "0" ]; then
+            DESIRED=$(kubectl -n "$STAGE_SLUG" get deployment/traffic-lab-demo -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)
+            UPDATED=$(kubectl -n "$STAGE_SLUG" get deployment/traffic-lab-demo -o jsonpath='{.status.updatedReplicas}' 2>/dev/null || echo 0)
+            AVAILABLE=$(kubectl -n "$STAGE_SLUG" get deployment/traffic-lab-demo -o jsonpath='{.status.availableReplicas}' 2>/dev/null || echo 0)
+            if [ "${DESIRED:-0}" -gt 0 ] && [ "${UPDATED:-0}" -ge "${DESIRED:-0}" ] && [ "${AVAILABLE:-0}" -ge "${DESIRED:-0}" ]; then
+              echo "::warning::Rollout timed out while old replicas terminate, but new replicas are ready. Continuing."
+            else
+              echo "::error::Rollout deployment/traffic-lab-demo не завершился за 180s. Собираем диагностику..."
+              kubectl -n "$STAGE_SLUG" get deployment/traffic-lab-demo -o wide || true
+              kubectl -n "$STAGE_SLUG" get rs,pods -l app=traffic-lab-demo -o wide || true
+              kubectl -n "$STAGE_SLUG" describe deployment/traffic-lab-demo || true
+              kubectl -n "$STAGE_SLUG" describe pod -l app=traffic-lab-demo || true
+              kubectl -n "$STAGE_SLUG" get events --sort-by=.lastTimestamp | tail -n 50 || true
+              exit 1
+            fi
+          fi
+          kubectl -n "$STAGE_SLUG" get pods
