@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Traffic Lab</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Observability Demo</p>
+          <h1>Traffic Lab</h1>
+        </div>
+        <div class="hero-status">
+          <span class="status-dot"></span>
+          <span id="scenarioBadge">steady</span>
+        </div>
+      </section>
+
+      <section class="grid stats-grid">
+        <article class="card metric-card">
+          <span class="metric-label">Requests</span>
+          <strong id="requestsTotal">0</strong>
+          <small>всего HTTP и synthetic запросов</small>
+        </article>
+        <article class="card metric-card">
+          <span class="metric-label">Avg latency</span>
+          <strong id="avgLatency">0 ms</strong>
+          <small>среднее по последним запросам</small>
+        </article>
+        <article class="card metric-card">
+          <span class="metric-label">Errors</span>
+          <strong id="errorsTotal">0</strong>
+          <small>ошибки и сбои за текущее время работы</small>
+        </article>
+        <article class="card metric-card">
+          <span class="metric-label">Logs</span>
+          <strong id="logsTotal">0</strong>
+          <small>JSON-логи в stdout для Loki</small>
+        </article>
+      </section>
+
+      <section class="grid control-grid">
+        <article class="card">
+          <h2>Сценарии</h2>
+          <p>
+            Переключайте профиль нагрузки, чтобы быстро увидеть разницу в
+            графиках и логах.
+          </p>
+          <div class="button-grid">
+            <button data-scenario="steady">Нормальная нагрузка</button>
+            <button data-scenario="spiky">Пиковая нагрузка</button>
+            <button data-scenario="noisy">Шумные логи</button>
+            <button data-scenario="chaos">Ошибки и таймауты</button>
+            <button data-scenario="idle">Почти простой</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="grid detail-grid">
+        <article class="card">
+          <h2>Runtime</h2>
+          <dl class="details">
+            <div>
+              <dt>Active workers</dt>
+              <dd id="activeWorkers">0</dd>
+            </div>
+            <div>
+              <dt>Synthetic users</dt>
+              <dd id="syntheticUsers">0</dd>
+            </div>
+            <div>
+              <dt>Warnings</dt>
+              <dd id="warningsTotal">0</dd>
+            </div>
+            <div>
+              <dt>Memory RSS</dt>
+              <dd id="memoryRss">0 MB</dd>
+            </div>
+            <div>
+              <dt>Heap used</dt>
+              <dd id="heapUsed">0 MB</dd>
+            </div>
+            <div>
+              <dt>Last latency</dt>
+              <dd id="lastLatency">0 ms</dd>
+            </div>
+          </dl>
+        </article>
+
+        <article class="card">
+          <h2>Последние события</h2>
+          <ul id="eventsList" class="events-list"></ul>
+        </article>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
