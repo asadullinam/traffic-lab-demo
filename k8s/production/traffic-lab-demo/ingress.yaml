@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: traffic-lab-demo
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: "traffic-lab-demo.042f87bf-a9e0-415d-b307-cd388ca44910.81.26.190.240.sslip.io"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: traffic-lab-demo
+                port:
+                  number: 3000
