@@ -5,7 +5,7 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-    - host: "traffic-lab-demo.042f87bf-a9e0-415d-b307-cd388ca44910.81.26.190.240.sslip.io"
+    - host: "traffic-lab-demo.042f87bf-a9e0-415d-b307-cd388ca44910.158.160.241.48.sslip.io"
       http:
         paths:
           - path: /
