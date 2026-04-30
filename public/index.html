@@ -4,95 +4,168 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Traffic Lab</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <main class="page">
-      <section class="hero">
-        <div>
-          <p class="eyebrow">Observability Demo</p>
+    <main class="shell">
+      <section class="hero-panel panel">
+        <div class="hero-copy">
+          <p class="overline">Synthetic observability workload</p>
           <h1>Traffic Lab</h1>
-        </div>
-        <div class="hero-status">
-          <span class="status-dot"></span>
-          <span id="scenarioBadge">steady</span>
-        </div>
-      </section>
-
-      <section class="grid stats-grid">
-        <article class="card metric-card">
-          <span class="metric-label">Requests</span>
-          <strong id="requestsTotal">0</strong>
-          <small>всего HTTP и synthetic запросов</small>
-        </article>
-        <article class="card metric-card">
-          <span class="metric-label">Avg latency</span>
-          <strong id="avgLatency">0 ms</strong>
-          <small>среднее по последним запросам</small>
-        </article>
-        <article class="card metric-card">
-          <span class="metric-label">Errors</span>
-          <strong id="errorsTotal">0</strong>
-          <small>ошибки и сбои за текущее время работы</small>
-        </article>
-        <article class="card metric-card">
-          <span class="metric-label">Logs</span>
-          <strong id="logsTotal">0</strong>
-          <small>JSON-логи в stdout для Loki</small>
-        </article>
-      </section>
-
-      <section class="grid control-grid">
-        <article class="card">
-          <h2>Сценарии</h2>
-          <p>
-            Переключайте профиль нагрузки, чтобы быстро увидеть разницу в
-            графиках и логах.
+          <p class="lede">
+            Отдельная песочница для всплесков трафика, ошибок, лог-шторма и
+            фоновой нагрузки. Без стилистики DeployService и без ощущения, что
+            это та же панель в другом цвете.
           </p>
-          <div class="button-grid">
-            <button data-scenario="steady">Нормальная нагрузка</button>
-            <button data-scenario="spiky">Пиковая нагрузка</button>
-            <button data-scenario="noisy">Шумные логи</button>
-            <button data-scenario="chaos">Ошибки и таймауты</button>
-            <button data-scenario="idle">Почти простой</button>
+        </div>
+
+        <div class="hero-side">
+          <div class="status-card">
+            <span class="status-label">Active scene</span>
+            <strong id="scenarioBadge">steady</strong>
+            <p id="scenarioDescription">Стабильная рабочая смена без сюрпризов.</p>
+          </div>
+
+          <div class="status-card compact">
+            <span class="status-label">Memory footprint</span>
+            <strong id="memoryHero">0 MB</strong>
+            <p>Текущий RSS процесса</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="signal-grid">
+        <article class="panel metric-primary traffic">
+          <span class="metric-kicker">Traffic volume</span>
+          <strong id="requestsTotal">0</strong>
+          <small id="requestsCaption">всего запросов прошло через стенд</small>
+        </article>
+
+        <article class="panel metric-primary latency">
+          <span class="metric-kicker">Response tempo</span>
+          <strong id="avgLatency">0 ms</strong>
+          <small id="latencyCaption">средняя задержка по последним вызовам</small>
+        </article>
+
+        <article class="panel metric-primary errors">
+          <span class="metric-kicker">Failure pressure</span>
+          <strong id="errorsTotal">0</strong>
+          <small id="errorRate">0% ошибок от общего потока</small>
+        </article>
+
+        <article class="panel metric-primary logs">
+          <span class="metric-kicker">Log pressure</span>
+          <strong id="logsTotal">0</strong>
+          <small id="logsCaption">структурированные события для Loki</small>
+        </article>
+      </section>
+
+      <section class="command-grid">
+        <article class="panel scene-panel">
+          <div class="panel-heading">
+            <p class="overline">Scenario controls</p>
+            <h2>Профили нагрузки</h2>
+          </div>
+
+          <div class="scenario-list">
+            <button class="scenario-chip" data-scenario="steady">
+              <span>steady</span>
+              <small>ровный поток и умеренный фон</small>
+            </button>
+            <button class="scenario-chip" data-scenario="spiky">
+              <span>spiky</span>
+              <small>всплески трафика и скачки latency</small>
+            </button>
+            <button class="scenario-chip" data-scenario="noisy">
+              <span>noisy</span>
+              <small>много audit/info логов</small>
+            </button>
+            <button class="scenario-chip" data-scenario="chaos">
+              <span>chaos</span>
+              <small>ошибки, timeouts и инциденты</small>
+            </button>
+            <button class="scenario-chip" data-scenario="idle">
+              <span>idle</span>
+              <small>почти тишина, только базовый heartbeat</small>
+            </button>
+          </div>
+        </article>
+
+        <article class="panel telemetry-panel">
+          <div class="panel-heading">
+            <p class="overline">Runtime telemetry</p>
+            <h2>Живые сигналы</h2>
+          </div>
+
+          <div class="telemetry-list">
+            <div class="telemetry-row">
+              <span>Workers</span>
+              <strong id="activeWorkers">0</strong>
+            </div>
+            <div class="telemetry-row">
+              <span>Synthetic users</span>
+              <strong id="syntheticUsers">0</strong>
+            </div>
+            <div class="telemetry-row">
+              <span>Warnings</span>
+              <strong id="warningsTotal">0</strong>
+            </div>
+            <div class="telemetry-row">
+              <span>Heap used</span>
+              <strong id="heapUsed">0 MB</strong>
+            </div>
+            <div class="telemetry-row">
+              <span>Last latency</span>
+              <strong id="lastLatency">0 ms</strong>
+            </div>
+            <div class="telemetry-row">
+              <span>Background jobs</span>
+              <strong id="backgroundJobs">0</strong>
+            </div>
+          </div>
+
+          <div class="meter-block">
+            <div class="meter-labels">
+              <span>Memory RSS</span>
+              <strong id="memoryRss">0 MB</strong>
+            </div>
+            <div class="meter-track">
+              <div id="memoryMeter" class="meter-fill"></div>
+            </div>
           </div>
         </article>
       </section>
 
-      <section class="grid detail-grid">
-        <article class="card">
-          <h2>Runtime</h2>
-          <dl class="details">
-            <div>
-              <dt>Active workers</dt>
-              <dd id="activeWorkers">0</dd>
+      <section class="insight-grid">
+        <article class="panel narrative-panel">
+          <div class="panel-heading">
+            <p class="overline">Scene summary</p>
+            <h2>Краткий диагноз</h2>
+          </div>
+          <div class="narrative-content">
+            <p id="narrativeLead">
+              Стенд прогрет и готов показывать изменяющуюся картину нагрузки.
+            </p>
+            <div class="narrative-chips">
+              <span id="uptimeChip" class="soft-chip">Uptime 0s</span>
+              <span id="logDensityChip" class="soft-chip">0 логов / запрос</span>
+              <span id="latencyChip" class="soft-chip">низкая задержка</span>
             </div>
-            <div>
-              <dt>Synthetic users</dt>
-              <dd id="syntheticUsers">0</dd>
-            </div>
-            <div>
-              <dt>Warnings</dt>
-              <dd id="warningsTotal">0</dd>
-            </div>
-            <div>
-              <dt>Memory RSS</dt>
-              <dd id="memoryRss">0 MB</dd>
-            </div>
-            <div>
-              <dt>Heap used</dt>
-              <dd id="heapUsed">0 MB</dd>
-            </div>
-            <div>
-              <dt>Last latency</dt>
-              <dd id="lastLatency">0 ms</dd>
-            </div>
-          </dl>
+          </div>
         </article>
 
-        <article class="card">
-          <h2>Последние события</h2>
-          <ul id="eventsList" class="events-list"></ul>
+        <article class="panel timeline-panel">
+          <div class="panel-heading">
+            <p class="overline">Event feed</p>
+            <h2>Последние события</h2>
+          </div>
+          <ul id="eventsList" class="timeline"></ul>
         </article>
       </section>
     </main>
